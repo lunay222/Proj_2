@@ -41,24 +41,29 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [revealedAnswers, setRevealedAnswers] = useState({}); // Track which answers are revealed
   const [selectedOptions, setSelectedOptions] = useState({}); // Track selected multiple choice answers
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL); // Configurable API URL
+  const [apiUrl, setApiUrl] = useState(null); // Start as null - will be set after detection
+  const [isDetectingIP, setIsDetectingIP] = useState(true); // Track if IP detection is in progress
   const [tempUrl, setTempUrl] = useState(DEFAULT_API_URL); // Temporary URL for settings input
   const [showInstructions, setShowInstructions] = useState(false); // Show/hide IP instructions
 
   // Initialize API URL and request permissions on mount
   useEffect(() => {
-    // Auto-detect backend IP on startup
+    // Auto-detect backend IP on startup - wait for it to complete before allowing API calls
     const initializeBackend = async () => {
+      setIsDetectingIP(true);
       try {
         console.log('🔍 Auto-detecting backend IP address...');
         const detectedURL = await getBackendURL();
+        console.log('✅ Backend URL set to:', detectedURL);
         setApiUrl(detectedURL);
         StudyCoachAPI.setBaseURL(detectedURL);
-        console.log('✅ Backend URL set to:', detectedURL);
       } catch (error) {
         console.warn('⚠️ Auto-detection failed, using fallback:', error);
         // Use fallback if detection fails
+        setApiUrl(DEFAULT_API_URL);
         StudyCoachAPI.setBaseURL(DEFAULT_API_URL);
+      } finally {
+        setIsDetectingIP(false);
       }
     };
 
@@ -66,9 +71,11 @@ export default function App() {
     requestPermissions();
   }, []); // Only run once on mount
 
-  // Update API service when apiUrl changes
+  // Update API service when apiUrl changes (but only if apiUrl is not null)
   useEffect(() => {
-    StudyCoachAPI.setBaseURL(apiUrl);
+    if (apiUrl) {
+      StudyCoachAPI.setBaseURL(apiUrl);
+    }
   }, [apiUrl]);
 
   // Update tempUrl when entering settings mode
@@ -95,6 +102,15 @@ export default function App() {
    * Now supports multiple document scanning
    */
   const handleScanNotes = async () => {
+    // Wait for IP detection to complete before allowing API calls
+    if (isDetectingIP || !apiUrl) {
+      Alert.alert(
+        'Please wait',
+        'Detecting backend server... Please wait a moment and try again.'
+      );
+      return;
+    }
+    
     try {
       setLoading(true);
       
@@ -326,6 +342,16 @@ export default function App() {
         [{ text: 'OK' }]
       );
       
+      // Wait for IP detection to complete before allowing API calls
+      if (isDetectingIP || !apiUrl) {
+        Alert.alert(
+          'Please wait',
+          'Detecting backend server... Please wait a moment and try again.'
+        );
+        setLoading(false);
+        return;
+      }
+      
       // Generate in parallel with staggered starts to avoid overwhelming Ollama
       // Start requests 3 seconds apart so they don't all hit at once
       // This is faster than sequential but more reliable than all-at-once
@@ -493,6 +519,7 @@ export default function App() {
    * Auto-detect backend using IP detection utility
    */
   const autoDetectBackend = async () => {
+    setIsDetectingIP(true);
     setLoading(true);
     
     Alert.alert(
@@ -508,6 +535,7 @@ export default function App() {
         const detectedUrl = `http://${detectedIP}:8000`;
         setApiUrl(detectedUrl);
         StudyCoachAPI.setBaseURL(detectedUrl);
+        setIsDetectingIP(false);
         setLoading(false);
         Alert.alert(
           '🎉 Backend Found!',
@@ -515,6 +543,7 @@ export default function App() {
           [{ text: 'Great!', onPress: () => setMode('home') }]
         );
       } else {
+        setIsDetectingIP(false);
         setLoading(false);
         Alert.alert(
           '❌ Backend Not Found',
@@ -523,6 +552,7 @@ export default function App() {
         );
       }
     } catch (error) {
+      setIsDetectingIP(false);
       setLoading(false);
       Alert.alert(
         '❌ Detection Error',
@@ -721,17 +751,30 @@ export default function App() {
       <Text style={styles.title}>AI Study Coach</Text>
       <Text style={styles.subtitle}>Scan your notes to generate quizzes</Text>
       
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleScanNotes}
-        disabled={loading}
-      >
-        <Text style={styles.buttonText}>📷 Scan Notes</Text>
-      </TouchableOpacity>
+      {/* Show detection status */}
+      {isDetectingIP ? (
+        <View style={styles.detectionBox}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.detectionText}>🔍 Detecting backend server...</Text>
+          <Text style={styles.detectionSubtext}>Please wait, this may take a minute</Text>
+        </View>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={[styles.button, (!apiUrl || loading) && styles.buttonDisabled]}
+            onPress={handleScanNotes}
+            disabled={loading || !apiUrl}
+          >
+            <Text style={styles.buttonText}>📷 Scan Notes</Text>
+          </TouchableOpacity>
+          
+          {loading && <ActivityIndicator size="large" style={styles.loader} />}
+        </>
+      )}
       
-      {loading && <ActivityIndicator size="large" style={styles.loader} />}
-      
-      <Text style={styles.apiUrlHint}>Backend: {apiUrl}</Text>
+      {apiUrl && !isDetectingIP && (
+        <Text style={styles.apiUrlHint}>Backend: {apiUrl}</Text>
+      )}
     </View>
   );
 
@@ -1311,6 +1354,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     textAlign: 'center',
+  },
+  detectionBox: {
+    backgroundColor: '#E8F5E9',
+    padding: 30,
+    borderRadius: 10,
+    marginVertical: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+  },
+  detectionText: {
+    marginTop: 15,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2E7D32',
+    textAlign: 'center',
+  },
+  detectionSubtext: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   autoDetectButton: {
     backgroundColor: '#9C27B0',
